@@ -1,4 +1,4 @@
-# composable-data-stack
+# The composable data stack
 
 A modular, self-hosted data platform repository for assembling reproducible data stack distributions from explicit, composable building blocks.
 
