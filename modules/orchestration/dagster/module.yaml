@@ -127,13 +127,14 @@ spec:
     compose:
       services:
         dagster-webserver:
-          image: dagster/dagster:latest
+          build:
+            context: ../dagster
+            dockerfile: Dockerfile
+          image: local/dagster:custom
           command:
-            - dagster-webserver
-            - -h
-            - 0.0.0.0
-            - -p
-            - 3000
+            - bash
+            - -c
+            - dagster-webserver -h 0.0.0.0 -p 3000
           ports:
             - "${config.webPort}:3000"
           environment:
@@ -154,10 +155,14 @@ spec:
 
         dagster-daemon:
           enabledFrom: spec.config.daemon.enabled
-          image: dagster/dagster:latest
+          build:
+            context: ../dagster
+            dockerfile: Dockerfile
+          image: local/dagster:custom
           command:
-            - dagster-daemon
-            - run
+            - bash
+            - -c
+            - dagster-daemon run
           environment:
             DAGSTER_HOME: "${config.homeDir}"
             DAGSTER_RUN_STORAGE_POSTGRES_URL: "${bindings.run-storage.connectionUri}"
