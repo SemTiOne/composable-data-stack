@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+import os
 import re
 
 from .diagnostics import Diagnostic
@@ -46,7 +47,23 @@ def build_plan(profile_path: str, env_file: str | None = None) -> tuple[dict[str
             continue
         
         source = module_instance["source"]
-        module_file = (profile_dir / source / "module.yaml").resolve()
+        source_path = Path(source)
+        if not source_path.is_absolute() and source_path.parts and source_path.parts[0] == ".":
+            source_path = source_path.relative_to(".")
+
+        module_root = os.getenv("CDS_MODULE_PATH")
+        module_file = None
+        if module_root:
+            module_root_path = Path(module_root).expanduser()
+            if module_root_path.is_file():
+                module_root_path = module_root_path.parent
+            candidate = (module_root_path / source_path / "module.yaml").resolve()
+            if candidate.exists():
+                module_file = candidate
+
+        if module_file is None:
+            module_file = (profile_dir / source_path / "module.yaml").resolve()
+
         module_def, diags = load_yaml_file(module_file)
         diagnostics.extend(diags)
         
@@ -88,7 +105,7 @@ def build_plan(profile_path: str, env_file: str | None = None) -> tuple[dict[str
                 "version": inst["version"],
                 "dependsOn": inst["dependsOn"],
                 "config": inst["config"],
-                "consumes": resolve_consumed_contracts(inst, module_instances_by_id, diagnostics, secrets),
+                "consumes": resolve_consumed_contracts(inst, module_instances_by_id, resolved_contracts_by_module, diagnostics, secrets),
                 "provides": resolved_contracts_by_module[inst["id"]],
                 "implementation": inst["module"].get("spec", {}).get("implementation", {}),
             }
@@ -181,6 +198,7 @@ def resolve_provided_contracts(inst: dict[str, Any], secrets: dict[str, str] = {
 def resolve_consumed_contracts(
     inst: dict[str, Any],
     modules_by_id: dict[str, dict[str, Any]],
+    resolved_contracts_by_module: dict[str, dict[str, Any]],
     diagnostics: list[Diagnostic],
     secrets: dict[str, str] = {},
 ) -> dict[str, Any]:
@@ -243,8 +261,8 @@ def resolve_consumed_contracts(
             )
             continue
 
-        provides = producer["module"].get("spec", {}).get("provides", [])
-        matched = next((p for p in provides if p.get("name") == provide_name), None)
+        provider_contracts = resolved_contracts_by_module.get(producer_id, {})
+        matched = provider_contracts.get(provide_name)
         if matched is None:
             diagnostics.append(
                 Diagnostic(
@@ -256,20 +274,9 @@ def resolve_consumed_contracts(
             )
             continue
 
-        contract = deepcopy(matched.get("contract", {}))
-        contract = substitute_values(
-            contract,
-            context={
-                "config": inst["config"],
-                "service": {"host": inst["id"]},
-                "secrets": secrets,
-                "bindings": {},
-            },
-        )
-
         resolved[consume_name] = {
             "contractRef": binding["contractRef"],
-            "contract": contract,
+            "contract": deepcopy(matched),
         }
 
     return resolved
