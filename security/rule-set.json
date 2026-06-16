@@ -1,0 +1,895 @@
+{
+  "$schema": "./rule-schema.json", 
+  "version": "1.0.0",
+  "metadata": {
+    "name": "cds-core-security-rules",
+    "description": "Core security validation rules for cds validate --security",
+    "defaultProfileClass": "local"
+  },
+  "rules": [
+    {
+      "id": "CDS-SEC-001",
+      "title": "Hardcoded secret-like value",
+      "severity": "high",
+      "category": "secrets",
+      "scope": ["profile-raw", "module-values"],
+      "match": {
+        "all": [
+          {
+            "keyRegex": "(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key|jwt|dsn)"
+          },
+          {
+            "notValueRegex": "^(\\$\\{[A-Z0-9_:-]+\\}|<set-me>|<from-env>|REDACTED|example)$"
+          }
+        ]
+      },
+      "message": "Secret-like value appears to be hardcoded",
+      "whyItMatters": "Hardcoded secrets are easy to leak via git, logs, and rendered artifacts.",
+      "recommendation": [
+        "Move the value to environment variables or a secret backend.",
+        "Replace literal values with references."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-002",
+      "title": "Secret embedded in URL or DSN",
+      "severity": "high",
+      "category": "secrets",
+      "scope": ["profile-raw", "profile-resolved", "service-env"],
+      "match": {
+        "any": [
+          {
+            "valueRegex": "^[a-zA-Z][a-zA-Z0-9+.-]*://[^\\s:@/]+:[^\\s@/]+@[^\\s]+$"
+          },
+          {
+            "valueRegex": "(?i)(token|apikey|api_key|access_token)=[^&\\s]+"
+          }
+        ]
+      },
+      "message": "Credential material appears embedded in a connection string or URL",
+      "whyItMatters": "Secrets in URLs are commonly exposed through logs, process listings, and config snapshots.",
+      "recommendation": [
+        "Move credentials out of DSNs and inject them separately.",
+        "Avoid query-string tokens in configuration."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-003",
+      "title": "Inline private key or high-entropy secret material",
+      "severity": "high",
+      "category": "secrets",
+      "scope": ["profile-raw", "module-values"],
+      "match": {
+        "any": [
+          {
+            "valueRegex": "-----BEGIN (RSA )?PRIVATE KEY-----"
+          },
+          {
+            "entropy": "high",
+            "minLength": 24
+          }
+        ]
+      },
+      "message": "Private key material or secret-like high-entropy value appears inline",
+      "whyItMatters": "Inline key material is highly sensitive and difficult to control once committed or rendered.",
+      "recommendation": [
+        "Store private keys in a secret backend or mounted secret file.",
+        "Do not keep cryptographic material directly in profile YAML."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-004",
+      "title": "Default or placeholder secret in non-local profile",
+      "severity": "high",
+      "category": "secrets",
+      "scope": ["profile-raw", "profile-resolved", "service-env"],
+      "match": {
+        "all": [
+          {
+            "profileClasses": ["dev", "staging", "prod"]
+          },
+          {
+            "equalsAny": [
+              "admin",
+              "admin123",
+              "password",
+              "password123",
+              "postgres",
+              "postgres123",
+              "changeme",
+              "change-me", 
+              "secret",
+              "default",
+              "test",
+              "superset"
+            ]
+          }
+        ]
+      },
+      "message": "Weak default or placeholder secret value detected",
+      "whyItMatters": "Default credentials are a common first target and are frequently exploited automatically.",
+      "recommendation": [
+        "Generate unique secrets for each environment.",
+        "Reject placeholder values outside local-only demo profiles."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-005",
+      "title": "Secret interpolated into non-secret field",
+      "severity": "high",
+      "category": "secrets",
+      "scope": ["profile-resolved", "bindings"],
+      "match": {
+        "all": [
+          {
+            "envInterpolation": true
+          },
+          {
+            "pathPatterns": [
+              "services.*.labels.*",
+              "services.*.annotations.*",
+              "services.*.command",
+              "services.*.args.*",
+              "outputs.*",
+              "plan.preview.*"
+            ]
+          }
+        ]
+      },
+      "message": "Secret reference appears to flow into a non-secret sink",
+      "whyItMatters": "Non-secret fields are often surfaced in logs, metadata, or UI output.",
+      "recommendation": [
+        "Restrict secrets to approved secret sinks such as env refs or secret files.",
+        "Do not inject secrets into labels, command arguments, or annotations."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-006",
+      "title": "Resolved secret present in generated or CLI output",
+      "severity": "high",
+      "category": "secrets",
+      "scope": ["none"],
+      "match": {
+        "any": [
+          {
+            "keyRegex": "(?i)(password|passwd|secret|token|api[_-]?key|private[_-]?key|dsn)"
+          },
+          {
+            "entropy": "high",
+            "minLength": 16
+          }
+        ]
+      },
+      "message": "Rendered or planned output appears to contain a resolved secret",
+      "whyItMatters": "Generated artifacts are often stored, shared, or captured by CI systems.",
+      "recommendation": [
+        "Redact secrets in plan and render output.",
+        "Avoid writing resolved secret values to generated files."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-010",
+      "title": "Default admin credentials",
+      "severity": "high",
+      "category": "auth",
+      "scope": ["profile-resolved", "service-env"],
+      "match": {
+        "any": [
+          {
+            "equalsAny": [
+              "admin:admin",
+              "admin:password",
+              "postgres:postgres",
+              "superset:superset"
+            ]
+          },
+          {
+            "pathPatterns": [
+              "services.*.environment.ADMIN_USERNAME",
+              "services.*.environment.ADMIN_PASSWORD",
+              "services.*.environment.POSTGRES_USER",
+              "services.*.environment.POSTGRES_PASSWORD"
+            ],
+            "equalsAny": [
+              "admin",
+              "password",
+              "postgres",
+              "superset"
+            ]
+          }
+        ]
+      },
+      "message": "Known default administrative credentials detected",
+      "whyItMatters": "Attackers routinely try default credentials first.",
+      "recommendation": [
+        "Set unique admin credentials before deployment.",
+        "Disallow well-known defaults in validation."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-011",
+      "title": "Missing required authentication secret",
+      "severity": "high",
+      "category": "auth",
+      "scope": ["profile-resolved", "service-env"],
+      "match": {
+        "all": [
+          {
+            "pathPatterns": [
+              "services.*.environment.SUPERSET_SECRET_KEY",
+              "services.*.environment.POSTGRES_PASSWORD",
+              "services.*.environment.ADMIN_PASSWORD",
+              "services.*.environment.JWT_SECRET"
+            ],
+            "profileClasses": ["dev", "staging", "prod"]
+          },
+          {
+            "allowEmpty": true
+          }
+        ]
+      },
+      "message": "A required authentication secret appears missing or empty",
+      "whyItMatters": "Missing auth secrets commonly trigger insecure defaults or prevent security controls from working.",
+      "recommendation": [
+        "Provide the required secret through environment or a secret store.",
+        "Fail validation when required auth material is missing."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-012",
+      "title": "Weak secret strength",
+      "severity": "high",
+      "category": "auth",
+      "scope": ["profile-raw", "profile-resolved", "service-env"],
+      "match": {
+        "any": [
+        {
+          "keyRegex": "(?i)(password|secret|token|key|credential|passwd|pwd|auth|api[-_]?key|access[-_]?key)",
+          "minLength": 1,
+          "valueRegex": "^.{1,11}$"
+        },
+        {
+          "keyRegex": "(?i)(password|secret|token|key|credential|passwd|pwd|auth|api[-_]?key|access[-_]?key)",
+          "equalsAny": [
+            "admin",
+            "password",
+            "secret",
+            "changeme",
+            "change-me",
+            "default",
+            "test123"
+          ]
+        }
+      ]
+    },
+    "message": "Secret value appears too weak or predictable",
+      "whyItMatters": "Short or predictable secrets can be guessed or brute-forced easily.",
+      "recommendation": [
+        "Require randomly generated secrets of sufficient length.",
+        "Reject dictionary-like or commonly used values."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-013",
+      "title": "Secret reused across unrelated services",
+      "severity": "medium",
+      "category": "auth",
+      "scope": ["profile-resolved", "service-env"],
+      "match": {
+        "all": [
+          {
+            "keyRegex": "(?i)(password|secret|token|key)"
+          },
+          {
+            "valueRegex": ".+"
+          }
+        ]
+      },
+      "message": "The same secret appears reused across multiple services",
+      "whyItMatters": "Credential reuse increases blast radius if one service is compromised.",
+      "recommendation": [
+        "Use separate credentials or secrets per service.",
+        "Generate scoped secrets rather than sharing one across components."
+      ],
+      "enabled": false
+    },
+    {
+      "id": "CDS-SEC-020",
+      "title": "Admin or UI service bound to 0.0.0.0",
+      "severity": "high",
+      "category": "network-exposure",
+      "scope": ["service"],
+      "match": {
+        "all": [
+          {
+            "serviceTypes": ["admin-ui"]
+          },
+          {
+            "portExposure": "0.0.0.0"
+          }
+        ]
+      },
+      "message": "Administrative or UI service is exposed on all interfaces",
+      "whyItMatters": "Broad exposure increases the chance of unintended access from other hosts or networks.",
+      "recommendation": [
+        "Bind local admin services to 127.0.0.1 by default.",
+        "Require explicit opt-in for broad network exposure."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-021",
+      "title": "Database service published externally",
+      "severity": "high",
+      "category": "network-exposure",
+      "scope": ["service"],
+      "match": {
+        "all": [
+          {
+            "serviceTypes": ["database"]
+          },
+          {
+            "portExposure": "host-published"
+          }
+        ]
+      },
+      "message": "Database service is published to the host network",
+      "whyItMatters": "Direct database exposure significantly expands attack surface.",
+      "recommendation": [
+        "Avoid publishing database ports unless strictly necessary.",
+        "Use internal networking or localhost-only bindings."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-022",
+      "title": "Non-local interface exposure in local profile",
+      "severity": "medium",
+      "category": "network-exposure",
+      "scope": ["service"],
+      "match": {
+        "all": [
+          {
+            "profileClasses": ["local"]
+          },
+          {
+            "portExposure": "host-published"
+          }
+        ]
+      },
+      "message": "A local profile exposes a service beyond localhost",
+      "whyItMatters": "Local demo environments are often assumed private but may still be reachable from nearby networks.",
+      "recommendation": [
+        "Prefer 127.0.0.1 bindings in local profiles.",
+        "Require an explicit allow override for broader exposure."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-023",
+      "title": "Authenticated service uses plain HTTP",
+      "severity": "medium",
+      "category": "network-exposure",
+      "scope": ["service", "profile-resolved"],
+      "match": {
+        "any": [
+          {
+            "pathPatterns": [
+              "services.*.url",
+              "services.*.ingress.*",
+              "services.*.environment.*_URL"
+            ],
+            "valueRegex": "^http://"
+          }
+        ]
+      },
+      "message": "Authenticated or user-facing service appears configured without TLS",
+      "whyItMatters": "Plain HTTP can expose credentials or session material over the network.",
+      "recommendation": [
+        "Use HTTPS/TLS where the service is accessed over a network.",
+        "Document exceptions for local-only usage."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-030",
+      "title": "Generated file contains resolved secrets",
+      "severity": "high",
+      "category": "file-output-safety",
+      "scope": ["none"],
+      "match": {
+        "any": [
+          {
+            "keyRegex": "(?i)(password|secret|token|api[_-]?key|private[_-]?key|dsn)"
+          },
+          {
+            "entropy": "high",
+            "minLength": 16
+          }
+        ]
+      },
+      "message": "Generated file appears to contain secret material",
+      "whyItMatters": "Files written to disk are easy to copy, commit, back up, or read later by unintended users.",
+      "recommendation": [
+        "Redact generated output or write secret references only.",
+        "Keep rendered artifacts free of resolved secrets."
+      ],
+      "enabled": false
+    },
+    {
+      "id": "CDS-SEC-031",
+      "title": "Env file path appears repository-managed or unmanaged",
+      "severity": "medium",
+      "category": "file-output-safety",
+      "scope": ["none"],
+      "match": {
+        "any": [
+          {
+            "pathPatterns": [
+              ".env",
+              "*.env",
+              "output/*.env",
+              "rendered/*.env",
+              "profiles/**/*.env"
+            ]
+          }
+        ]
+      },
+      "message": "Environment file path may be stored or handled insecurely",
+      "whyItMatters": "Env files often accumulate sensitive data and are easily committed accidentally.",
+      "recommendation": [
+        "Keep secret env files out of generated output directories and version control.",
+        "Prefer secret injection over checked-in env files."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-032",
+      "title": "Secret file permissions too broad",
+      "severity": "medium",
+      "category": "file-output-safety",
+      "scope": ["none"],
+      "match": {
+        "any": [
+          {
+            "permissions": "world-readable"
+          },
+          {
+            "permissions": "group-readable"
+          }
+        ]
+      },
+      "message": "Secret-bearing file permissions are broader than owner-only",
+      "whyItMatters": "Local users or processes may read secrets that should be restricted.",
+      "recommendation": [
+        "Set permissions to owner-only for files containing secrets.",
+        "Tighten file creation umask for generated secret artifacts."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-033",
+      "title": "Literal secret stored in profile instead of secret source",
+      "severity": "medium",
+      "category": "file-output-safety",
+      "scope": ["profile-raw", "profile-resolved"],
+      "match": {
+        "all": [
+          {
+            "keyRegex": "(?i)(password|secret|token|key)"
+          },
+          {
+            "notValueRegex": "^\\$\\{[A-Z0-9_:-]+\\}$"
+          }
+        ]
+      },
+      "message": "A secret-like field contains a literal value rather than an external reference",
+      "whyItMatters": "Profiles are commonly shared, rendered, or checked into source control.",
+      "recommendation": [
+        "Use environment or secret-backend references for sensitive fields.",
+        "Keep profiles declarative and secret-free."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-040",
+      "title": "Unresolved env var falls back to insecure default",
+      "severity": "high",
+      "category": "config-integrity",
+      "scope": ["profile-raw", "profile-resolved", "service-env"],
+      "match": {
+        "any": [
+          {
+            "fallbackPattern": "^\\$\\{[A-Z0-9_]+:-?(admin|password|postgres|changeme|secret|default)\\}$"
+          }
+        ]
+      },
+      "message": "Environment interpolation uses an insecure fallback default",
+      "whyItMatters": "Fallbacks silently weaken security when required env vars are missing.",
+      "recommendation": [
+        "Remove insecure defaults for secrets.",
+        "Fail validation when mandatory secret env vars are absent."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-041",
+      "title": "Required env var resolves to empty secret",
+      "severity": "high",
+      "category": "config-integrity",
+      "scope": ["profile-resolved", "service-env"],
+      "match": {
+        "all": [
+          {
+            "keyRegex": "(?i)(password|secret|token|key)"
+          },
+          {
+            "allowEmpty": true
+          }
+        ]
+      },
+      "message": "Required secret-like field resolves to an empty value",
+      "whyItMatters": "Empty secrets may disable protection or trigger insecure application behavior.",
+      "recommendation": [
+        "Ensure required env vars are present before rendering.",
+        "Treat empty secret values as validation failures."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-042",
+      "title": "Binding injects secret into unapproved target",
+      "severity": "high",
+      "category": "config-integrity",
+      "scope": ["bindings", "profile-resolved"],
+      "match": {
+        "all": [
+          {
+            "keyRegex": "(?i)(password|secret|token|key)"
+          },
+          {
+            "secretSinkPolicy": "forbidden"
+          }
+        ]
+      },
+      "message": "Binding appears to route secret material into a forbidden sink",
+      "whyItMatters": "Incorrect binding targets can leak secrets to metadata, arguments, or unrelated services.",
+      "recommendation": [
+        "Allow secrets only in approved sinks such as environment references or secret mounts.",
+        "Add policy checks for binding destinations."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-043",
+      "title": "Profile inheritance weakens secure defaults",
+      "severity": "medium",
+      "category": "config-integrity",
+      "scope": ["profile-resolved"],
+      "match": {
+        "any": [
+          {
+            "pathPatterns": [
+              "services.*.ports.*",
+              "services.*.env.*",
+              "services.*.runtime.*"
+            ]
+          }
+        ]
+      },
+      "message": "Derived profile appears to override a secure parent setting with an insecure value",
+      "whyItMatters": "Inheritance can unintentionally remove protections when child profiles diverge.",
+      "recommendation": [
+        "Track origin of inherited settings and flag security regressions.",
+        "Require explicit approval for overrides that reduce security."
+      ],
+      "enabled": false
+    },
+    {
+      "id": "CDS-SEC-050",
+      "title": "Container image uses latest tag",
+      "severity": "medium",
+      "category": "supply-chain",
+      "scope": ["none"],
+      "match": {
+        "any": [
+          { "pathPatterns": ["services.*.image"] },
+          { "valueRegex": "^[^@]+:latest$" },
+          { "notValueRegex": "^local/" }
+        ]
+      },
+      "message": "Container image uses the latest tag",
+      "whyItMatters": "Floating tags reduce reproducibility and can introduce unexpected changes.",
+      "recommendation": [
+        "Pin images to explicit versions.",
+        "Prefer immutable digests for critical services."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-051",
+      "title": "Critical image missing digest pin",
+      "severity": "medium",
+      "category": "supply-chain",
+      "scope": ["none"],
+      "match": {
+        "all": [
+          { "serviceTypes": ["admin-ui", "database", "api"] },
+          { "pathPatterns": ["services.*.image"] },
+          { "notValueRegex": "@sha256:[a-f0-9]{64}" }
+        ]
+      },
+      "message": "Critical service image is not pinned by digest",
+      "whyItMatters": "Digest pinning helps ensure integrity and repeatable deployments.",
+      "recommendation": [
+        "Use image digests for critical services.",
+        "Define policy exceptions only when necessary."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-052",
+      "title": "Image registry outside allowlist",
+      "severity": "medium",
+      "category": "supply-chain",
+      "scope": ["none"],
+      "match": {
+        "all": [
+          { "pathPatterns": ["services.*.image"] },
+          { "notValueRegex": "^(docker\\.io/|ghcr\\.io/|local/)" }
+        ]
+      },
+      "message": "Image registry does not match the configured allowlist",
+      "whyItMatters": "Unreviewed registries increase supply-chain risk and reduce provenance confidence.",
+      "recommendation": [
+        "Restrict images to trusted registries.",
+        "Maintain an explicit allowlist per environment."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-053",
+      "title": "Image version below policy minimum",
+      "severity": "medium",
+      "category": "supply-chain",
+      "scope": ["none"],
+      "match": {
+        "any": [
+          {
+            "imageTagPolicy": "require-tag"
+          }
+        ]
+      },
+      "message": "Image tag may violate minimum supported version policy",
+      "whyItMatters": "Older images are more likely to contain known vulnerabilities or unsupported components.",
+      "recommendation": [
+        "Define minimum supported versions for critical services.",
+        "Fail validation when image tags fall below policy."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-054",
+      "title": "Unpinned image tag in non-local profile",
+      "severity": "medium",
+      "category": "supply-chain",
+      "scope": ["none"],
+      "match": {
+        "all": [
+          { "profileClasses": ["dev", "staging", "prod"] },
+          { "pathPatterns": ["services.*.image"] },
+          { "imageTagPolicy": "forbid-latest" }
+        ]
+      },
+      "message": "Service image uses the ':latest' tag in a non-local profile",
+      "whyItMatters": "Unpinned images can silently introduce breaking changes or vulnerabilities.",
+      "recommendation": [
+        "Pin images to a specific version tag or digest.",
+        "Use digest pinning (@sha256:...) for production environments."
+      ],
+      "enabled": true
+    }, 
+    {
+      "id": "CDS-SEC-060",
+      "title": "Container runs as root",
+      "severity": "medium",
+      "category": "runtime-hardening",
+      "scope": ["runtime", "service"],
+      "match": {
+        "any": [
+          {
+            "pathPatterns": [
+              "services.*.user"
+            ],
+            "equalsAny": ["root", "0"]
+          }
+        ]
+      },
+      "message": "Container appears configured to run as root",
+      "whyItMatters": "Running as root increases impact if the container is compromised.",
+      "recommendation": [
+        "Run services as a non-root user where supported.",
+        "Define user IDs explicitly in hardened profiles."
+      ],
+      "enabled": false
+    },
+    {
+      "id": "CDS-SEC-061",
+      "title": "Privileged container or excessive capabilities",
+      "severity": "high",
+      "category": "runtime-hardening",
+      "scope": ["runtime", "service"],
+      "match": {
+        "any": [
+          {
+            "pathPatterns": [
+              "services.*.privileged"
+            ],
+            "equalsAny": ["true", "True", "1"]
+          },
+          {
+            "runtimeFlags": [
+              "CAP_SYS_ADMIN",
+              "CAP_NET_ADMIN",
+              "privileged"
+            ]
+          }
+        ]
+      },
+      "message": "Container requests privileged mode or broad kernel capabilities",
+      "whyItMatters": "Privileged execution significantly increases host compromise risk.",
+      "recommendation": [
+        "Disable privileged mode unless strictly required.",
+        "Grant the minimum capabilities necessary."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-062",
+      "title": "Writable root filesystem",
+      "severity": "medium",
+      "category": "runtime-hardening",
+      "scope": ["runtime", "service"],
+      "match": {
+        "any": [
+          {
+            "pathPatterns": [
+              "services.*.read_only"
+            ],
+            "equalsAny": ["false", "False", "0"]
+          }
+        ]
+      },
+      "message": "Service does not enforce a read-only root filesystem",
+      "whyItMatters": "Writable roots make persistence and tampering easier after compromise.",
+      "recommendation": [
+        "Enable read-only root filesystems where feasible.",
+        "Use explicit writable mounts for required paths."
+      ],
+      "enabled": false
+    },
+    {
+      "id": "CDS-SEC-063",
+      "title": "Sensitive host path mount",
+      "severity": "high",
+      "category": "runtime-hardening",
+      "scope": ["runtime", "service"],
+      "match": {
+        "any": [
+          {
+            "pathPatterns": [
+              "services.*.volumes.*"
+            ],
+            "containsAny": [
+              "/var/run/docker.sock",
+              "/:/",
+              "/root",
+              "/etc/ssh",
+              "/etc/passwd",
+              "/etc/shadow"
+            ]
+          }
+        ]
+      },
+      "message": "Service mounts a sensitive host path",
+      "whyItMatters": "Sensitive host mounts can expose control of the host or critical credentials.",
+      "recommendation": [
+        "Remove sensitive host mounts unless essential.",
+        "Use narrower read-only mounts and isolate access."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-070",
+      "title": "Secret appears in command args or log configuration",
+      "severity": "high",
+      "category": "observability-leakage",
+      "scope": ["none"],
+      "match": {
+        "any": [
+          {
+            "pathPatterns": [
+              "services.*.command",
+              "services.*.args.*",
+              "services.*.logging.*"
+            ],
+            "keyRegex": "(?i)(password|secret|token|key)"
+          },
+          {
+            "valueRegex": "(?i)(--password=|--token=|--secret=|password=|token=|secret=)"
+          }
+        ]
+      },
+      "message": "Secret-like material appears in command-line arguments or logging config",
+      "whyItMatters": "Arguments and logging settings are commonly exposed through process listings and diagnostics.",
+      "recommendation": [
+        "Pass secrets through environment references or mounted secret files.",
+        "Avoid including secret values in command-line flags."
+      ],
+      "enabled": true
+    },
+    {
+      "id": "CDS-SEC-071",
+      "title": "CLI plan or validate output prints secrets",
+      "severity": "high",
+      "category": "observability-leakage",
+      "scope": ["none"],
+      "match": {
+        "any": [
+          {
+            "keyRegex": "(?i)(password|secret|token|api[_-]?key|private[_-]?key|dsn)"
+          },
+          {
+            "valueRegex": "-----BEGIN (RSA )?PRIVATE KEY-----"
+          },
+          {
+            "entropy": "high",
+            "minLength": 16
+          }
+        ]
+      },
+      "message": "CLI output appears to contain sensitive values",
+      "whyItMatters": "Terminal output is often copied into tickets, CI logs, or chat systems.",
+      "recommendation": [
+        "Redact sensitive output by default.",
+        "Provide explicit unsafe flags for debugging only."
+      ],
+      "enabled": false
+    },
+    {
+      "id": "CDS-SEC-072",
+      "title": "Debug mode enabled for sensitive service",
+      "severity": "medium",
+      "category": "observability-leakage",
+      "scope": ["service", "service-env"],
+      "match": {
+        "any": [
+          {
+            "pathPatterns": [
+              "services.*.environment.DEBUG",
+              "services.*.environment.FLASK_DEBUG",
+              "services.*.logging.level"
+            ],
+            "equalsAny": ["true", "True", "1", "debug", "DEBUG"]
+          }
+        ]
+      },
+      "message": "Debug or overly verbose logging appears enabled",
+      "whyItMatters": "Debug modes frequently expose configuration values, stack traces, or credentials.",
+      "recommendation": [
+        "Disable debug logging in shared or sensitive environments.",
+        "Use controlled debug overrides only when necessary."
+      ],
+      "enabled": true
+    }
+  ]
+}

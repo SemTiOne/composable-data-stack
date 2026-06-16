@@ -16,6 +16,7 @@ from .validator import has_errors, validate_profile
 from .planner import build_plan
 from .renderer import render_compose
 from .image_updates import collect_module_images, check_image_update
+from .security import run_security_validation
 
 
 def print_diagnostics(diagnostics) -> None:
@@ -120,38 +121,29 @@ def list_modules() -> list[str]:
     return modules
 
 
+def _add_profile_arg(subparser: argparse.ArgumentParser) -> None:
+    action = subparser.add_argument(
+        "profile",
+        nargs="?",
+        help="Profile path or identifier. Uses CDS_PROFILE_PATH if set.",
+    )
+    if argcomplete is not None:
+        action.completer = profile_completer  # type: ignore[attr-defined]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="cds")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    profile_arg_kwargs = {
-        "completer": profile_completer,
-    } if argcomplete is not None else {}
-
     validate_parser = subparsers.add_parser("validate", help="Validate a profile")
-    validate_parser.add_argument(
-        "profile",
-        nargs="?",
-        help="Profile path or identifier. Uses CDS_PROFILE_PATH if set.",
-        **profile_arg_kwargs,
-    )
+    _add_profile_arg(validate_parser)
 
     plan_parser = subparsers.add_parser("plan", help="Build a resolved plan from a profile")
-    plan_parser.add_argument(
-        "profile",
-        nargs="?",
-        help="Profile path or identifier. Uses CDS_PROFILE_PATH if set.",
-        **profile_arg_kwargs,
-    )
+    _add_profile_arg(plan_parser)
     plan_parser.add_argument("--json", action="store_true", help="Output plan as JSON")
 
     render_parser = subparsers.add_parser("render", help="Render docker compose from a profile")
-    render_parser.add_argument(
-        "profile",
-        nargs="?",
-        help="Profile path or identifier. Uses CDS_PROFILE_PATH if set.",
-        **profile_arg_kwargs,
-    )
+    _add_profile_arg(render_parser)
     render_parser.add_argument("--output", "-o", help="Output file path for rendered output")
 
     list_parser = subparsers.add_parser("list", help="List available profiles or modules")
@@ -159,6 +151,9 @@ def main() -> int:
     list_subparsers.add_parser("profiles", help="List available profiles")
     list_subparsers.add_parser("modules", help="List available module sources")
     list_subparsers.add_parser("images", help="List images from module templates and check for newer versions")
+
+    security_parser = subparsers.add_parser("security", help="Run security validation on a profile")
+    _add_profile_arg(security_parser)
 
     if argcomplete is not None:
         argcomplete.autocomplete(parser)
@@ -300,8 +295,57 @@ def main() -> int:
                     )
             return 0
 
+    if args.command == "security":
+        try:
+            profile_path = resolve_profile_path(args.profile)
+        except ValueError as exc:
+            print(f"ERROR {exc}")
+            return 1
+
+        diagnostics = validate_profile(profile_path)
+        if has_errors(diagnostics):
+            print_diagnostics(diagnostics)
+            print("Cannot run security validation because profile validation failed.")
+            return 1
+
+        repo_root = Path(__file__).resolve().parents[1]
+        rule_schema_path = repo_root / "security" / "rule-schema.json"
+        rule_set_path = repo_root / "security" / "rule-set.json"
+
+        try:
+            findings, diagnostics = run_security_validation(
+                profile_path=Path(profile_path),
+                rule_schema_path=rule_schema_path,
+                rule_set_path=rule_set_path,
+                env_file=None,
+            )
+        except Exception as e:
+            print(str(e), file=sys.stderr)
+            return 2
+
+        for diag in diagnostics:
+            print(diag.format(), file=sys.stderr)
+
+        if not findings:
+            print("No security findings.")
+            return 0
+
+        for f in findings:
+            print(f"[{f['severity'].upper()}] {f['rule_id']} {f['message']}")
+            print(f"  object: {f['path']}")
+            print(f"  module: {f['module']}")
+            if f["value"] is not None:
+                print(f"  value: {f['value']}")
+            for rec in f["recommendation"]:
+                print(f"  fix: {rec}")
+            print()
+
+        return 1 if any(f["severity"] == "high" for f in findings) else 0
+
+    print("Base validation not shown here.")
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
+
