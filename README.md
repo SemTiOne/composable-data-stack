@@ -443,7 +443,7 @@ Only runtime packaging differs.
 | Explicit contracts | ❌ | ❌ | ✅ |
 | Reproducibility | ⚠️ | ⚠️ | ✅ |
 | Security validation | ❌ | ❌ | ✅ |
-
+| Vendor lock-in | ✅ | ⚠️ | ❌ |
 ---
 
 ## 📌 Status
