@@ -148,7 +148,7 @@ This allows you to go from a declarative profile to a runnable local data stack.
 
 Coming next:
 
-- Docker / Kubernetes generation  
+- Kubernetes generation  
 - one-command stack bootstrap  
 - automated health checks  
 
