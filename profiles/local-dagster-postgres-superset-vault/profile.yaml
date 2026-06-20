@@ -8,7 +8,8 @@ metadata:
   displayName: Local Dagster + Postgres + Superset (Vault Secrets)
   description: >
     Minimal local development stack for orchestration, warehouse, and BI.
-    Uses Vault for secret management instead of environment variables.
+    Includes a Vault dev container for secret bootstrap alongside the stack.
+    The Vault root token is supplied via `CDS_VAULT_TOKEN`.
 
 spec:
   runtime:
