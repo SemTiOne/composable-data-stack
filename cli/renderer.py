@@ -1,3 +1,4 @@
+# pyright: reportMissingModuleSource=false
 # cli/renderer.py
 """
 Render docker-compose YAML from a composition plan.
