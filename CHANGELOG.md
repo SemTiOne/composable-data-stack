@@ -8,14 +8,23 @@ The format is based on Keep a Changelog.
 
 ### Added
 
+- No entries yet.
+
+## [0.1.1] - 2026-06-21
+
+### Added
+
 - Default render output path to project-root docker-compose.yml when no output is provided.
 - Open-source project governance and support docs.
 - Troubleshooting guidance in the README for common CLI validation, secret, and contract-binding errors.
+- Added `docs/os-compatibility.md` with OS compatibility analysis and recommendations.
+- Improved the bug report template with severity and minimal repro fields.
 
 ### Changed
 
 - Compose rendering now preserves secrets as runtime environment placeholders instead of embedding resolved values.
 - Plan secret mapping now stores env variable names rather than secret values.
+- Renderer build-context path rewriting now preserves portable relative paths for nested compose output directories.
 
 ### Tests
 
