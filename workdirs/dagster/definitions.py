@@ -1,4 +1,6 @@
 import hashlib
+import importlib
+import importlib.util
 import csv
 import json
 import os
@@ -10,7 +12,10 @@ from psycopg2 import sql
 from psycopg2.extras import execute_values
 
 from dagster import (
+    AssetObservation,
     Definitions,
+    Field,
+    MetadataValue,
     RunRequest,
     SensorEvaluationContext,
     SkipReason,
@@ -20,6 +25,28 @@ from dagster import (
     op,
     sensor,
 )
+
+def _load_module_from_path(module_name: str, file_path: Path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ModuleNotFoundError(f"Unable to load module from {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+try:
+    _db_connection = importlib.import_module("shared.python.db.connection")
+except ModuleNotFoundError:
+    repo_root = Path(__file__).resolve().parents[2]
+    shared_connection_path = repo_root / "shared" / "python" / "db" / "connection.py"
+    if shared_connection_path.exists():
+        _db_connection = _load_module_from_path("cds_shared_db_connection", shared_connection_path)
+    else:
+        local_connection_path = Path(__file__).resolve().with_name("postgres_connection.py")
+        _db_connection = _load_module_from_path("cds_local_postgres_connection", local_connection_path)
+
+insert_incoming_file_event = _db_connection.insert_incoming_file_event
 
 INCOMING_DATA_DIR = Path(os.getenv("CDS_INCOMING_DATA_DIR", "/app/data/cds/incoming"))
 PROCESSED_DATA_DIR = Path(os.getenv("CDS_PROCESSED_DATA_DIR", "/app/data/cds/processed"))
@@ -178,20 +205,22 @@ def _ingest_file_into_db(conn, file_path: Path) -> tuple[str, int]:
     )
 
 
-@asset
-def hello_cds() -> str:
-    return "hello from cds"
+def save_data_to_db(context, payload: dict, asset_key: str = "cds_ingestion") -> None:
+    """Persist payload to the analytics database and emit a Dagster event."""
+
+    metadata = {}
+    for key, value in payload.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            metadata[key] = value
+        else:
+            metadata[key] = MetadataValue.json(value)
+
+    insert_incoming_file_event(payload, asset_key)
+
+    context.log_event(AssetObservation(asset_key=asset_key, metadata=metadata))
 
 
-hello_cds_job = define_asset_job("hello_cds_job", selection=["hello_cds"])
-
-
-@op(config_schema={"incoming_dir": str, "processed_dir": str, "files": [str]})
-def pickup_incoming_files(context) -> None:
-    incoming_dir = Path(context.op_config["incoming_dir"])
-    processed_dir = Path(context.op_config["processed_dir"])
-    files = context.op_config["files"]
-
+def _move_files(incoming_dir: Path, processed_dir: Path, files: list[str]) -> int:
     processed_dir.mkdir(parents=True, exist_ok=True)
     db_uri = _resolve_target_db_uri()
 
@@ -231,6 +260,25 @@ def pickup_incoming_files(context) -> None:
         source.replace(destination)
         moved_files += 1
 
+    return moved_files
+
+
+@asset
+def hello_cds() -> str:
+    return "hello from cds"
+
+
+hello_cds_job = define_asset_job("hello_cds_job", selection=["hello_cds"])
+
+
+@op(config_schema={"incoming_dir": str, "processed_dir": str, "files": [str]})
+def pickup_incoming_files(context) -> None:
+    incoming_dir = Path(context.op_config["incoming_dir"])
+    processed_dir = Path(context.op_config["processed_dir"])
+    files = context.op_config["files"]
+
+    moved_files = _move_files(incoming_dir, processed_dir, files)
+
     context.log.info(
         "Picked up %s file(s) from %s into %s after ingesting %s record(s)",
         moved_files,
@@ -238,6 +286,94 @@ def pickup_incoming_files(context) -> None:
         processed_dir,
         ingested_records,
     )
+    save_data_to_db(
+        context,
+        {
+            "event": "pickup_incoming_files",
+            "incoming_dir": str(incoming_dir),
+            "processed_dir": str(processed_dir),
+            "file_count": moved_files,
+            "files": files,
+        },
+    )
+
+
+@op(config_schema={"incoming_dir": str, "file_name": Field(str, is_required=False)})
+def read_data(context) -> dict:
+    incoming_dir = Path(context.op_config["incoming_dir"])
+    configured_file_name = context.op_config.get("file_name")
+
+    if configured_file_name:
+        target = incoming_dir / configured_file_name
+        candidates = [target] if target.exists() and target.is_file() else []
+    else:
+        candidates = sorted(
+            [entry for entry in incoming_dir.iterdir() if entry.is_file()]
+            if incoming_dir.exists()
+            else [],
+            key=lambda entry: entry.name,
+        )
+
+    if not candidates:
+        context.log.info("No incoming files available to read in %s", incoming_dir)
+        return {"status": "no_file", "incoming_dir": str(incoming_dir)}
+
+    selected = candidates[0]
+    content = selected.read_text(encoding="utf-8", errors="replace")
+
+    result = {
+        "status": "ok",
+        "incoming_dir": str(incoming_dir),
+        "file_name": selected.name,
+        "size_bytes": selected.stat().st_size,
+        "content": content,
+    }
+
+    save_data_to_db(
+        context,
+        {
+            "event": "read_data",
+            "incoming_dir": str(incoming_dir),
+            "file_name": selected.name,
+            "size_bytes": selected.stat().st_size,
+        },
+        asset_key="cds_read",
+    )
+
+    return result
+
+
+@op(config_schema={"processed_dir": str})
+def process_incoming_file(context, read_result: dict) -> None:
+    if read_result.get("status") != "ok":
+        context.log.info("Skipping processing because no file was read")
+        return
+
+    incoming_dir = Path(read_result["incoming_dir"])
+    processed_dir = Path(context.op_config["processed_dir"])
+    file_name = read_result["file_name"]
+
+    moved_files = _move_files(incoming_dir, processed_dir, [file_name])
+    preview = read_result.get("content", "")[:200]
+
+    save_data_to_db(
+        context,
+        {
+            "event": "process_incoming_file",
+            "incoming_dir": str(incoming_dir),
+            "processed_dir": str(processed_dir),
+            "file_name": file_name,
+            "moved_count": moved_files,
+            "content": read_result.get("content"),
+            "content_preview": preview,
+        },
+        asset_key="cds_pipeline",
+    )
+
+
+@job
+def process_incoming_file_job() -> None:
+    process_incoming_file(read_data())
 
 
 @job
@@ -245,7 +381,7 @@ def pickup_incoming_files_job() -> None:
     pickup_incoming_files()
 
 
-@sensor(job=pickup_incoming_files_job, minimum_interval_seconds=30)
+@sensor(job=process_incoming_file_job, minimum_interval_seconds=30)
 def incoming_files_sensor(context: SensorEvaluationContext):
     if not INCOMING_DATA_DIR.exists():
         return SkipReason(f"Incoming directory does not exist: {INCOMING_DATA_DIR}")
@@ -275,11 +411,15 @@ def incoming_files_sensor(context: SensorEvaluationContext):
         run_key=run_key,
         run_config={
             "ops": {
-                "pickup_incoming_files": {
+                "read_data": {
                     "config": {
                         "incoming_dir": str(INCOMING_DATA_DIR),
+                        "file_name": file_names[0],
+                    }
+                },
+                "process_incoming_file": {
+                    "config": {
                         "processed_dir": str(PROCESSED_DATA_DIR),
-                        "files": file_names,
                     }
                 }
             }
@@ -290,6 +430,6 @@ def incoming_files_sensor(context: SensorEvaluationContext):
 
 defs = Definitions(
     assets=[hello_cds],
-    jobs=[hello_cds_job, pickup_incoming_files_job],
+    jobs=[hello_cds_job, pickup_incoming_files_job, process_incoming_file_job],
     sensors=[incoming_files_sensor],
 )

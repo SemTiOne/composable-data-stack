@@ -434,7 +434,6 @@ class MainCLITest(unittest.TestCase):
         self.assertIn("up", cmd)
         self.assertIn("--detach", cmd)
 
-
 class CollectModuleImagesTest(unittest.TestCase):
 
     _ROOT = Path(__file__).parent.parent
