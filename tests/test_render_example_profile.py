@@ -59,6 +59,7 @@ class RenderExampleProfileTest(unittest.TestCase):
             self.assertIsInstance(compose, dict)
             self.assertIn("services", compose)
             self.assertGreater(len(compose["services"]), 0)
+            self.assertIn("dagster-dagster-io-manager-storage", compose.get("volumes", {}))
             self.assertIn("name", compose)
             self.assertIn("dagster-user-code", compose["services"])
             self.assertEqual(
@@ -82,6 +83,10 @@ class RenderExampleProfileTest(unittest.TestCase):
                     "4000",
                 ],
             )
+            analytics_env = compose["services"]["dagster-user-code"]["environment"]
+            self.assertIn("ANALYTICS_DB_NAME", analytics_env)
+            self.assertIn("ANALYTICS_DB_CONNECTION_URI", analytics_env)
+            self.assertIn("postgresql://", analytics_env["ANALYTICS_DB_CONNECTION_URI"])
             dagster_volumes = compose["services"]["dagster-user-code"].get("volumes", [])
             shared_data_mount = next(
                 (
