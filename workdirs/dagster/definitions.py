@@ -2,6 +2,7 @@ import hashlib
 import importlib
 import importlib.util
 import csv
+import io
 import json
 import os
 import re
@@ -51,6 +52,7 @@ insert_incoming_file_event = _db_connection.insert_incoming_file_event
 INCOMING_DATA_DIR = Path(os.getenv("CDS_INCOMING_DATA_DIR", "/app/data/cds/incoming"))
 PROCESSED_DATA_DIR = Path(os.getenv("CDS_PROCESSED_DATA_DIR", "/app/data/cds/processed"))
 SUPPORTED_INGEST_EXTENSIONS = {".csv", ".json", ".ndjson"}
+TEXT_FILE_ENCODINGS = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 
 
 def _is_processable_file(file_path: Path) -> bool:
@@ -103,10 +105,42 @@ def _resolve_target_db_uri() -> str:
     )
 
 
-def _ingest_csv_file(conn, file_path: Path, table_name: str, source_file: str) -> int:
-    with file_path.open("r", newline="", encoding="utf-8") as handle:
+def _read_text_with_fallback(file_path: Path, logger=None) -> str:
+    payload = file_path.read_bytes()
+    decode_errors: list[str] = []
+    for encoding in TEXT_FILE_ENCODINGS:
+        try:
+            if logger is not None:
+                logger.debug("Attempting to decode %s with encoding %s", file_path.name, encoding)
+            return payload.decode(encoding)
+        except UnicodeDecodeError as exc:
+            decode_errors.append(f"{encoding}: {exc}")
+            if logger is not None:
+                logger.debug(
+                    "Decoding %s with %s failed at byte %s: %s",
+                    file_path.name,
+                    encoding,
+                    exc.start,
+                    exc,
+                )
+
+    if logger is not None:
+        logger.error("Unable to decode %s with supported encodings", file_path)
+
+    raise RuntimeError(
+        "Unable to decode text file {path}. Tried encodings: {encodings}".format(
+            path=file_path,
+            encodings="; ".join(decode_errors),
+        )
+    )
+
+
+def _ingest_csv_file(conn, file_path: Path, table_name: str, source_file: str, logger=None) -> int:
+    with io.StringIO(_read_text_with_fallback(file_path, logger=logger), newline="") as handle:
         reader = csv.DictReader(handle)
         if not reader.fieldnames:
+            if logger is not None:
+                logger.warning("CSV file %s has no headers; skipping", source_file)
             return 0
 
         raw_headers = [header or "column" for header in reader.fieldnames]
@@ -128,6 +162,8 @@ def _ingest_csv_file(conn, file_path: Path, table_name: str, source_file: str) -
                 sql.SQL("{} text").format(sql.Identifier(col_name))
                 for col_name in column_names
             )
+            if logger is not None:
+                logger.debug("CSV headers for %s normalized to columns: %s", source_file, column_names)
             create_query = sql.SQL(
                 "CREATE TABLE IF NOT EXISTS {} "
                 "(source_file text NOT NULL, ingested_at timestamptz NOT NULL DEFAULT now(), {})"
@@ -139,6 +175,8 @@ def _ingest_csv_file(conn, file_path: Path, table_name: str, source_file: str) -
                 rows.append([source_file, *[(row.get(raw) if row.get(raw) is not None else "") for raw in raw_headers]])
 
             if not rows:
+                if logger is not None:
+                    logger.info("CSV file %s had no data rows", source_file)
                 conn.commit()
                 return 0
 
@@ -151,10 +189,11 @@ def _ingest_csv_file(conn, file_path: Path, table_name: str, source_file: str) -
     return len(rows)
 
 
-def _ingest_json_file(conn, file_path: Path, table_name: str, source_file: str) -> int:
-    with file_path.open("r", encoding="utf-8") as handle:
-        content = handle.read().strip()
+def _ingest_json_file(conn, file_path: Path, table_name: str, source_file: str, logger=None) -> int:
+    content = _read_text_with_fallback(file_path, logger=logger).strip()
     if not content:
+        if logger is not None:
+            logger.info("JSON file %s is empty after trimming whitespace", source_file)
         return 0
 
     records: list[dict] = []
@@ -170,6 +209,9 @@ def _ingest_json_file(conn, file_path: Path, table_name: str, source_file: str) 
             records.extend(parsed)
         else:
             records.append(parsed)
+
+    if logger is not None:
+        logger.debug("Parsed %s JSON record(s) from %s", len(records), source_file)
 
     with conn.cursor() as cursor:
         table_ident = sql.Identifier(table_name)
@@ -192,13 +234,15 @@ def _ingest_json_file(conn, file_path: Path, table_name: str, source_file: str) 
     return len(records)
 
 
-def _ingest_file_into_db(conn, file_path: Path) -> tuple[str, int]:
+def _ingest_file_into_db(conn, file_path: Path, logger=None) -> tuple[str, int]:
     table_name = _derive_target_table(file_path)
     suffix = file_path.suffix.lower()
+    if logger is not None:
+        logger.debug("Preparing ingestion for file=%s suffix=%s target_table=%s", file_path.name, suffix, table_name)
     if suffix == ".csv":
-        return table_name, _ingest_csv_file(conn, file_path, table_name, file_path.name)
+        return table_name, _ingest_csv_file(conn, file_path, table_name, file_path.name, logger=logger)
     if suffix in {".json", ".ndjson"}:
-        return table_name, _ingest_json_file(conn, file_path, table_name, file_path.name)
+        return table_name, _ingest_json_file(conn, file_path, table_name, file_path.name, logger=logger)
     raise RuntimeError(
         f"Unsupported file extension '{suffix or '<none>'}'. "
         "Supported extensions are .csv, .json, and .ndjson"
@@ -220,20 +264,28 @@ def save_data_to_db(context, payload: dict, asset_key: str = "cds_ingestion") ->
     context.log_event(AssetObservation(asset_key=asset_key, metadata=metadata))
 
 
-def _move_files(incoming_dir: Path, processed_dir: Path, files: list[str]) -> int:
+def _move_files(context, incoming_dir: Path, processed_dir: Path, files: list[str]) -> tuple[int, int]:
     processed_dir.mkdir(parents=True, exist_ok=True)
     db_uri = _resolve_target_db_uri()
+    context.log.debug(
+        "Starting move+ingest for %s candidate file(s) from %s to %s",
+        len(files),
+        incoming_dir,
+        processed_dir,
+    )
 
     moved_files = 0
     ingested_records = 0
     for file_name in files:
         source = incoming_dir / file_name
+        context.log.debug("Evaluating candidate file: %s", source)
         if not _is_processable_file(source):
+            context.log.debug("Skipping non-processable file: %s", source)
             continue
 
         try:
             with psycopg2.connect(db_uri) as conn:
-                table_name, row_count = _ingest_file_into_db(conn, source)
+                table_name, row_count = _ingest_file_into_db(conn, source, logger=context.log)
                 ingested_records += row_count
             context.log.info(
                 "Ingested %s row(s) from %s into table %s",
@@ -256,11 +308,14 @@ def _move_files(incoming_dir: Path, processed_dir: Path, files: list[str]) -> in
                     destination = candidate
                     break
                 counter += 1
+            context.log.debug("Destination existed; using unique destination %s", destination)
 
         source.replace(destination)
+        context.log.debug("Moved %s to %s", source, destination)
         moved_files += 1
 
-    return moved_files
+    context.log.debug("Completed move+ingest: moved_files=%s ingested_records=%s", moved_files, ingested_records)
+    return moved_files, ingested_records
 
 
 @asset
@@ -277,7 +332,7 @@ def pickup_incoming_files(context) -> None:
     processed_dir = Path(context.op_config["processed_dir"])
     files = context.op_config["files"]
 
-    moved_files = _move_files(incoming_dir, processed_dir, files)
+    moved_files, ingested_records = _move_files(context, incoming_dir, processed_dir, files)
 
     context.log.info(
         "Picked up %s file(s) from %s into %s after ingesting %s record(s)",
@@ -293,6 +348,7 @@ def pickup_incoming_files(context) -> None:
             "incoming_dir": str(incoming_dir),
             "processed_dir": str(processed_dir),
             "file_count": moved_files,
+            "row_count": ingested_records,
             "files": files,
         },
     )
@@ -302,6 +358,7 @@ def pickup_incoming_files(context) -> None:
 def read_data(context) -> dict:
     incoming_dir = Path(context.op_config["incoming_dir"])
     configured_file_name = context.op_config.get("file_name")
+    context.log.debug("read_data start incoming_dir=%s configured_file_name=%s", incoming_dir, configured_file_name)
 
     if configured_file_name:
         target = incoming_dir / configured_file_name
@@ -319,6 +376,7 @@ def read_data(context) -> dict:
         return {"status": "no_file", "incoming_dir": str(incoming_dir)}
 
     selected = candidates[0]
+    context.log.debug("read_data selected file %s from %s candidate(s)", selected.name, len(candidates))
     content = selected.read_text(encoding="utf-8", errors="replace")
 
     result = {
@@ -345,6 +403,7 @@ def read_data(context) -> dict:
 
 @op(config_schema={"processed_dir": str})
 def process_incoming_file(context, read_result: dict) -> None:
+    context.log.debug("process_incoming_file received status=%s", read_result.get("status"))
     if read_result.get("status") != "ok":
         context.log.info("Skipping processing because no file was read")
         return
@@ -353,8 +412,14 @@ def process_incoming_file(context, read_result: dict) -> None:
     processed_dir = Path(context.op_config["processed_dir"])
     file_name = read_result["file_name"]
 
-    moved_files = _move_files(incoming_dir, processed_dir, [file_name])
+    moved_files, ingested_records = _move_files(context, incoming_dir, processed_dir, [file_name])
     preview = read_result.get("content", "")[:200]
+    context.log.debug(
+        "process_incoming_file finished move+ingest for %s: moved_files=%s ingested_records=%s",
+        file_name,
+        moved_files,
+        ingested_records,
+    )
 
     save_data_to_db(
         context,
@@ -364,6 +429,7 @@ def process_incoming_file(context, read_result: dict) -> None:
             "processed_dir": str(processed_dir),
             "file_name": file_name,
             "moved_count": moved_files,
+            "row_count": ingested_records,
             "content": read_result.get("content"),
             "content_preview": preview,
         },
@@ -383,6 +449,7 @@ def pickup_incoming_files_job() -> None:
 
 @sensor(job=process_incoming_file_job, minimum_interval_seconds=30)
 def incoming_files_sensor(context: SensorEvaluationContext):
+    context.log.debug("Sensor evaluation started for incoming directory %s", INCOMING_DATA_DIR)
     if not INCOMING_DATA_DIR.exists():
         return SkipReason(f"Incoming directory does not exist: {INCOMING_DATA_DIR}")
 
@@ -393,6 +460,8 @@ def incoming_files_sensor(context: SensorEvaluationContext):
     if not files:
         return SkipReason(f"No files found in {INCOMING_DATA_DIR}")
 
+    context.log.debug("Sensor found %s processable file(s): %s", len(files), [entry.name for entry in files])
+
     state_parts: list[str] = []
     file_names: list[str] = []
     for entry in files:
@@ -401,11 +470,13 @@ def incoming_files_sensor(context: SensorEvaluationContext):
         file_names.append(entry.name)
 
     state_signature = "|".join(state_parts)
+    context.log.debug("Sensor state signature: %s", state_signature)
     if context.cursor == state_signature:
         return SkipReason("No new incoming files detected")
 
     context.update_cursor(state_signature)
     run_key = hashlib.sha256(state_signature.encode("utf-8")).hexdigest()
+    context.log.info("Launching run for incoming file %s with run_key=%s", file_names[0], run_key)
 
     return RunRequest(
         run_key=run_key,
