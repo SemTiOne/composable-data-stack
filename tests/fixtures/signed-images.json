@@ -17,21 +17,21 @@
   "images": {
     "cds-dagster": {
       "repository": "ghcr.io/ronaldhensbergen/cds-dagster",
-      "digest": "sha256:66d481414ee5ee61e23c50ccdc680b562dff6e26a2897bf2863955946848fe7d",
+      "digest": "sha256:13b682230e73ccd60b2a0542de87fb73f9aec905a0fa9c42b4a43ac764069f9e",
       "signed": true,
       "provenanceAttested": true,
       "sbomAttested": true
     },
     "cds-superset": {
       "repository": "ghcr.io/ronaldhensbergen/cds-superset",
-      "digest": "sha256:953747e8d03bf7140132ce0bb327445baff23f4dc6aaa3f7de2edf54c5df8483",
+      "digest": "sha256:40bb9ad1374e58fa9d40783b47e8eb4b199d048ee0f1ca1478c4787709efebcb",
       "signed": true,
       "provenanceAttested": true,
       "sbomAttested": true
     },
     "cds-dbt": {
       "repository": "ghcr.io/ronaldhensbergen/cds-dbt",
-      "digest": "sha256:b68df5abd8ef892a59f38b84ef3d0546a6acb2129c986a32ef29599f8c58a1b8",
+      "digest": "sha256:96e973ec0dd7081c9fd215ae1bf80c7997da495a6cfb7a521d7b12decef25cfa",
       "signed": true,
       "provenanceAttested": true,
       "sbomAttested": true
