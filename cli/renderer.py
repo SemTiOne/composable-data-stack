@@ -69,7 +69,7 @@ def render_compose(
     # Extract networks from runtime config
     runtime = plan.get("runtime", {})
     networks_config = runtime.get("networks", [])
-    
+
     # Build networks section
     networks: dict[str, Any] = {}
     for net in networks_config:
@@ -88,7 +88,7 @@ def render_compose(
         "volumes": {},
     }
     module_service_names: dict[str, list[str]] = {}
-    
+
     # Add networks if defined
     if networks or default_network_name:
         if not networks:
@@ -263,11 +263,11 @@ def _render_services(
             project_root=project_root,
             compose_dir=compose_dir,
         )
-        
+
         # Attach to the network if network_name is provided
         if network_name:
             service_copy["networks"] = [network_name]
-        
+
         rendered[service_name] = service_copy
 
     return rendered
@@ -302,21 +302,21 @@ def _merge_init_db_env(
 ) -> None:
     """
     Merge initDbEnv into postgres service environment variables.
-    
+
     If a module has config.initDbEnv, merge those environment variables
     into any service named "postgres" in the rendered services.
     """
     init_db_env = module.get("config", {}).get("initDbEnv")
     if not init_db_env or not isinstance(init_db_env, dict):
         return
-    
+
     # Find postgres service and merge env vars
     postgres_service = services.get("postgres")
     if postgres_service and isinstance(postgres_service, dict):
         env = postgres_service.setdefault("environment", {})
         if not isinstance(env, dict):
             return
-        
+
         # Substitute values in init_db_env and merge
         context = _build_context(module, secrets)
         for key, value in init_db_env.items():
@@ -748,39 +748,39 @@ def _add_cross_module_dependencies(
 ) -> None:
     """
     Add explicit cross-module dependencies to docker-compose services.
-    
+
     For each module that has dependsOn declarations, add depends_on entries
     to all its services, referencing all services from the dependent modules.
     """
     modules = plan.get("modules", [])
     services = compose.get("services", {})
-    
+
     # For each module, add depends_on for its dependencies
     for module in modules:
         module_id = module.get("id")
         depends_on = module.get("dependsOn", [])
-        
+
         if not depends_on or not module_id:
             continue
-        
+
         # Find all services belonging to this module
         current_module_service_names = module_service_names.get(module_id, [])
-        
+
         # For each service in this module, add depends_on entries
         for service_name in current_module_service_names:
             service_def = services.get(service_name)
             if not service_def:
                 continue
-            
+
             # Collect all services from dependent modules
             for dep_module_id in depends_on:
                 dep_services = module_service_names.get(dep_module_id, [])
-                
+
                 for dep_service_name in dep_services:
                     # Initialize depends_on if not present
                     if "depends_on" not in service_def:
                         service_def["depends_on"] = {}
-                    
+
                     # Add the dependency with a started condition
                     if isinstance(service_def["depends_on"], dict):
                         service_def["depends_on"][dep_service_name] = {

@@ -100,7 +100,7 @@
               "postgres",
               "postgres123",
               "changeme",
-              "change-me", 
+              "change-me",
               "secret",
               "default",
               "test",
@@ -696,7 +696,7 @@
         "Use digest pinning (@sha256:...) for production environments."
       ],
       "enabled": true
-    }, 
+    },
     {
       "id": "CDS-SEC-060",
       "title": "Container runs as root",
