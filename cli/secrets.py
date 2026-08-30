@@ -88,18 +88,18 @@ def load_secrets_from_env(env_file: Path | None = None) -> tuple[dict[str, str],
 def resolve_secret(key: str, secrets: dict[str, str], required: bool = False) -> tuple[str | None, Diagnostic | None]:
     """
     Resolve a single secret by key.
-    
+
     Args:
         key: Secret key (e.g., "CDS_ANALYTICS_POSTGRES_PASSWORD")
         secrets: Dictionary of available secrets
         required: If True, emit error if secret is missing
-        
+
     Returns:
         Tuple of (value, diagnostic). Value is None if not found.
     """
     if key in secrets:
         return secrets[key], None
-    
+
     if required:
         return None, Diagnostic(
             level="error",
@@ -107,7 +107,7 @@ def resolve_secret(key: str, secrets: dict[str, str], required: bool = False) ->
             message=f'Required secret "{key}" not found in .env or environment',
             path=f"secrets.{key}",
         )
-    
+
     return None, None
 
 def load_profile_secrets(

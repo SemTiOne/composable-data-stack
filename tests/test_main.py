@@ -196,7 +196,7 @@ class MainCLITest(unittest.TestCase):
     def test_plan_saves_to_file_with_output_flag(self, mock_validate, mock_build_plan):
         """Test that plan --output saves the plan to a file."""
         import tempfile
-        
+
         profile_file = self.profiles_root / "local-dagster-postgres-superset" / "profile.yaml"
         test_plan = {
             "apiVersion": "cds/v1alpha1",
@@ -204,26 +204,26 @@ class MainCLITest(unittest.TestCase):
             "metadata": {"name": "test"},
             "modules": [],
         }
-        
+
         mock_validate.return_value = []
         mock_build_plan.return_value = (test_plan, [])
-        
+
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             output_file = f.name
-        
+
         try:
             with patch.dict(os.environ, {"CDS_PROFILE_PATH": str(self.profiles_root)}, clear=False), patch.object(
                 sys, "argv", ["cds", "plan", "local-dagster-postgres-superset", "--output", output_file]
             ):
                 result = main()
-            
+
             self.assertEqual(result, 0)
             mock_validate.assert_called_once_with(str(profile_file), environment=None)
             mock_build_plan.assert_called_once()
             called_args, called_kwargs = mock_build_plan.call_args
             self.assertEqual(called_args[0], str(profile_file))
             self.assertIn("env_file", called_kwargs)
-            
+
             # Verify file was written
             saved_plan = json.loads(Path(output_file).read_text())
             self.assertEqual(saved_plan["apiVersion"], "cds/v1alpha1")
@@ -259,7 +259,7 @@ class MainCLITest(unittest.TestCase):
     def test_render_from_plan_file(self):
         """Test rendering from a saved plan file."""
         import tempfile
-        
+
         # Create a minimal valid plan
         plan = {
             "apiVersion": "cds/v1alpha1",
@@ -271,18 +271,18 @@ class MainCLITest(unittest.TestCase):
             "outputs": {},
             "modules": [],
         }
-        
+
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(plan, f)
             plan_file = f.name
-        
+
         try:
             with patch("cli.main.render_compose") as mock_render:
                 mock_render.return_value = ("name: test\nservices: {}\n", [])
-                
+
                 with patch.object(sys, "argv", ["cds", "render", plan_file]):
                     result = main()
-                
+
                 self.assertEqual(result, 0)
                 # Verify render was called with the plan from file
                 mock_render.assert_called_once()
@@ -300,10 +300,10 @@ class MainCLITest(unittest.TestCase):
             # The temp dir does not have .git or pyproject.toml
             profile_path = Path(td) / "profile.yaml"
             profile_path.touch()
-            
+
             with patch.object(Path, "cwd", return_value=Path("/mock/cwd")):
                 resolved = resolve_project_root(str(profile_path))
-                
+
                 self.assertEqual(resolved, Path("/mock/cwd").resolve())
 
     def test_init_generates_env_file_from_profile_secrets(self):
@@ -1109,7 +1109,7 @@ class CollectModuleImagesTest(unittest.TestCase):
         self.assertTrue(image.endswith(":custom"), f"Expected :custom tag, got: {image}")
         from cli.image_updates import extract_base_image
         base = extract_base_image(Path(entry["dockerfile"]))
-        
+
         content = self._DOCKERFILE.read_text()
         from_line = next(
             line for line in content.splitlines()

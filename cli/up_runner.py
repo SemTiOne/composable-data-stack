@@ -254,4 +254,3 @@ def poll_state_until_settled(
             return False, grouped
 
         sleep_fn(poll_interval)
-

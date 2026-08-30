@@ -293,7 +293,7 @@ spec:
         type: string
         minLength: 1
         description: Name of the database to create
-        
+
       username:
         type: string
         minLength: 1
@@ -891,7 +891,7 @@ implementation:
 modules:
   - id: postgres
     # ... postgres module config
-  
+
   - id: dagster
     dependsOn:
       - postgres        # ← INTER-MODULE: dagster module depends on postgres module

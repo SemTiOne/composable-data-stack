@@ -33,7 +33,7 @@ class RenderExampleProfileTest(unittest.TestCase):
 
             plan, plan_diags = build_plan(str(profile_path), env_file=str(env_file))
             self.assertIsNotNone(plan)
-            
+
             error_diags = [d for d in plan_diags if d.level == "error"]
             # Add debugging output for errors
             if error_diags:
@@ -50,7 +50,7 @@ class RenderExampleProfileTest(unittest.TestCase):
                     except Exception:
                         pass
                 print("="*60 + "\n")
-            
+
             self.assertEqual(len(error_diags), 0)
 
             output, render_diags = render_compose(plan, env_file=str(env_file))
@@ -135,7 +135,7 @@ class RenderExampleProfileTest(unittest.TestCase):
 
             plan, plan_diags = build_plan(str(profile_path), env_file=str(env_file))
             self.assertIsNotNone(plan)
-            
+
             error_diags = [d for d in plan_diags if d.level == "error"]
             # Add debugging output for errors
             if error_diags:
@@ -152,7 +152,7 @@ class RenderExampleProfileTest(unittest.TestCase):
                     except Exception:
                         pass
                 print("="*60 + "\n")
-            
+
             self.assertEqual(len(error_diags), 0)
 
             output, render_diags = render_compose(plan, env_file=str(env_file))

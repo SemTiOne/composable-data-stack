@@ -477,15 +477,15 @@ def resolve_outputs(
     """
     contracts = outputs.get("contracts", {})
     resolved: dict[str, Any] = {"contracts": {}}
-    
+
     for name, value in contracts.items():
         ref = value.get("from")
-        
+
         if not isinstance(ref, str):
             continue
-        
+
         parsed = parse_contract_ref(ref)
-        
+
         if parsed is None:
             diagnostics.append(
                 Diagnostic(
@@ -496,10 +496,10 @@ def resolve_outputs(
                 )
             )
             continue
-        
+
         module_id, provide_name = parsed
         contract = resolved_contracts_by_module.get(module_id, {}).get(provide_name)
-        
+
         if contract is None:
             diagnostics.append(
                 Diagnostic(
@@ -510,12 +510,12 @@ def resolve_outputs(
                 )
             )
             continue
-        
+
         resolved["contracts"][name] = {
             "from": ref,
             "contract": contract,
         }
-    
+
     return resolved
 
 
@@ -615,4 +615,3 @@ def resolve_expr(expr: str, context: dict[str, Any]) -> Any:
         return f"${{{cds_name}}}"
 
     return value
-
