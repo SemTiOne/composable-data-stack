@@ -202,7 +202,7 @@ $env:CDS_MODULE_PATH = 'C:\path\to\modules'
 ## 6. Using the CLI with defaults
 
 Once installed, commands can use shorthand profile names when the env vars are set:
-  
+
 ```bash
 cds list profiles
 cds list modules
