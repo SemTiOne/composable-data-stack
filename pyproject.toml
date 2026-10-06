@@ -92,4 +92,3 @@ select = ["UP", "F", "B", "S", "I"]
 # fixtures and rendered-output checks (S103/S108), and opens local/loopback
 # URLs to poll test fixtures (S310).
 "tests/*" = ["S101", "S103", "S108", "S310", "S603", "S607"]
-
