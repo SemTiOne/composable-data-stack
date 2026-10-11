@@ -354,7 +354,7 @@ def _eval_condition(
         or _path_matches_any(path, _NON_SECRET_PATH_PATTERNS)
     ):
         return False
-    
+
     if "pathPatterns" in cond and not _path_matches_any(path, cond["pathPatterns"]):
         return False
     if "keyRegex" in cond and not re.search(cond["keyRegex"], key or ""):

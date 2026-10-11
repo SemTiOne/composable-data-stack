@@ -27,7 +27,7 @@ class TestResolveProfilePath(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             profile_file = Path(tmpdir) / "profile.yaml"
             profile_file.write_text("apiVersion: cds/v1alpha1\n")
-            
+
             with patch.dict(os.environ, {"CDS_PROFILE_PATH": str(profile_file)}, clear=False):
                 result = resolve_profile_path(None)
                 self.assertEqual(result, str(profile_file.resolve()))
@@ -38,7 +38,7 @@ class TestResolveProfilePath(unittest.TestCase):
             profile_dir = Path(tmpdir)
             profile_file = profile_dir / "profile.yaml"
             profile_file.write_text("apiVersion: cds/v1alpha1\n")
-            
+
             with patch.dict(os.environ, {"CDS_PROFILE_PATH": str(profile_dir)}, clear=False):
                 result = resolve_profile_path(None)
                 self.assertEqual(result, str(profile_file.resolve()))
@@ -51,7 +51,7 @@ class TestResolveProfilePath(unittest.TestCase):
             local_dir.mkdir()
             profile_file = local_dir / "profile.yaml"
             profile_file.write_text("apiVersion: cds/v1alpha1\n")
-            
+
             with patch.dict(os.environ, {"CDS_PROFILE_PATH": str(profiles_root)}, clear=False):
                 result = resolve_profile_path(None)
                 self.assertEqual(result, str(profile_file.resolve()))
@@ -61,10 +61,10 @@ class TestResolveProfilePath(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             env_profile = Path(tmpdir) / "env_profile.yaml"
             env_profile.write_text("apiVersion: cds/v1alpha1\n")
-            
+
             arg_profile = Path(tmpdir) / "arg_profile.yaml"
             arg_profile.write_text("apiVersion: cds/v1alpha1\n")
-            
+
             with patch.dict(os.environ, {"CDS_PROFILE_PATH": str(env_profile)}, clear=False):
                 result = resolve_profile_path(str(arg_profile))
                 self.assertEqual(result, str(arg_profile.resolve()))

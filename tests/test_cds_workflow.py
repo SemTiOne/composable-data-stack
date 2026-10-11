@@ -19,14 +19,14 @@ def _find_cds() -> list[str]:
     """
     # Try to find cds in virtual environment (cross-platform)
     venv_dir = _REPO_ROOT / ".venv"
-    
+
     # On Windows: .venv\Scripts\cds.exe
     if sys.platform == "win32":
         venv_cds = venv_dir / "Scripts" / "cds.exe"
     else:
         # On Unix-like systems: .venv/bin/cds
         venv_cds = venv_dir / "bin" / "cds"
-    
+
     if venv_cds.exists():
         return [str(venv_cds)]
     return [sys.executable, "-m", "cli.main"]
