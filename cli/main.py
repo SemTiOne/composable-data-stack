@@ -71,7 +71,7 @@ def load_env_file(env_file: str = ".env") -> None:
         # Skip empty lines and comments
         if not line or line.startswith("#"):
             continue
-        
+
         # Parse KEY=VALUE format
         if "=" in line:
             key, value = line.split("=", 1)
@@ -405,12 +405,12 @@ def _resolve_profile_root(profile_root: Path) -> str | None:
 
 def resolve_profile_path(profile: str | None) -> str:
     profile_root = get_profiles_root()
-    
+
     if profile:
         candidate = Path(profile)
         if candidate.is_file():
             return str(candidate.resolve())
-        
+
         if candidate.suffix == ".yaml":
             return str(candidate.resolve())
 
@@ -1033,7 +1033,7 @@ def _render_helm_chart(plan, output_dir, force):
 def main() -> int:
     # Load .env file if it exists
     load_env_file()
-    
+
     parser = argparse.ArgumentParser(
         prog="cds",
         description=(
@@ -1438,7 +1438,7 @@ def main() -> int:
         args.environment = getattr(args, "environment", None) or load_saved_environment()
     if args.command in {"render", "up", "test"}:
         args.image_source = getattr(args, "image_source", None) or load_saved_image_source()
-    
+
     if args.command == "validate":
         try:
             profile_path = resolve_profile_path(args.profile)
@@ -1538,7 +1538,7 @@ def main() -> int:
             return 1
 
         plan_json = json.dumps(plan, indent=2)
-        
+
         if args.output:
             # Save plan to file
             output_file = Path(args.output)
